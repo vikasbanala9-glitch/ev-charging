@@ -1,0 +1,39 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EV Charging Manager</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f4f7f5;color:#1b2a22}
+header{background:#0b6e4f;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
+main{max-width:920px;margin:auto;padding:16px}.card{background:#fff;border-radius:8px;padding:14px;margin:12px 0;box-shadow:0 1px 3px #0002}
+input,select,button{padding:7px;margin:3px;font:inherit}button{background:#0b6e4f;color:#fff;border:0;border-radius:5px;cursor:pointer}
+button.x{background:#a33}table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #ddd;text-align:left;font-size:14px}h3{margin:0 0 8px}
+</style></head><body>
+<header><b>⚡ EV Charging Manager</b><span id="who"></span></header><main id="app"></main>
+<script>
+let U=JSON.parse(localStorage.getItem('u')||'null');const $=id=>document.getElementById(id);
+async function api(p,m='GET',b){const r=await fetch('/api'+p,{method:m,headers:{'Content-Type':'application/json','X-User-Id':U?U.id:''},body:b?JSON.stringify(b):undefined});
+ const t=await r.text();if(!r.ok){let e=t;try{e=JSON.parse(t).message||'Request failed ('+r.status+')'}catch(_){}alert(e);throw e}return t?JSON.parse(t):null}
+const act=async(p,m='POST')=>{await api(p,m);render()};
+async function auth(kind){const b={email:$('em').value,password:$('pw').value};if(kind=='register')b.name=$('nm').value;
+ U=await api('/'+kind,'POST',b);localStorage.setItem('u',JSON.stringify(U));render()}
+function logout(){U=null;localStorage.removeItem('u');render()}
+async function book(){if(!$('st').value){alert('Pick both a date and a time');return}await api('/bookings','POST',{chargerId:$('ch').value,start:$('st').value,hours:$('hr').value});alert('Booked!');render()}
+async function addStation(){await api('/stations','POST',{name:$('sn').value,location:$('sl').value});render()}
+async function addCharger(){await api('/chargers','POST',{stationId:$('cs').value,type:$('ct').value,powerKw:+$('cp').value,ratePerKwh:+$('cr').value});render()}
+async function render(){
+ $('who').innerHTML=U?`${U.name} (${U.role}) <button onclick="logout()">Logout</button>`:'';
+ if(!U){$('app').innerHTML=`<div class=card><h3>Login / Register</h3><input id=nm placeholder="Name (register only)"><input id=em placeholder=Email><input id=pw type=password placeholder=Password>
+ <button onclick="auth('login')">Login</button><button onclick="auth('register')">Register</button><p><small>Admin demo: admin@ev.com / admin123</small></p></div>`;return}
+ const [st,ch,bk]=await Promise.all([api('/stations'),api('/chargers'),api('/bookings/'+(U.role=='ADMIN'?'':'mine'))]);
+ const adm=U.role=='ADMIN',cn=id=>{const c=ch.find(x=>x.id==id),s=c&&st.find(x=>x.id==c.stationId);return c?`${s?s.name:''} #${c.id} (${c.type})`:id};
+ let h=`<div class=card><h3>Stations & chargers</h3>`+st.map(s=>`<p><b>${s.name}</b> — ${s.location}</p><table><tr><th>ID<th>Type<th>kW<th>₹/kWh<th>Status${adm?'<th>':''}</tr>`+
+  ch.filter(c=>c.stationId==s.id).map(c=>`<tr><td>${c.id}<td>${c.type}<td>${c.powerKw}<td>${c.ratePerKwh}<td>${c.status}${adm?`<td><button onclick="act('/chargers/${c.id}/status?value=${c.status=='OFFLINE'?'AVAILABLE':'OFFLINE'}','PUT')">${c.status=='OFFLINE'?'Enable':'Set offline'}</button>`:''}</tr>`).join('')+`</table>`).join('')+`</div>`;
+ h+=`<div class=card><h3>Book a slot</h3><select id=ch>${ch.filter(c=>c.status!='OFFLINE').map(c=>`<option value=${c.id}>${cn(c.id)} – ${c.powerKw}kW</option>`).join('')}</select>
+ <input id=st type=datetime-local><select id=hr><option>0.5<option selected>1<option>2<option>3</select> hours <button onclick="book()">Book</button></div>`;
+ h+=`<div class=card><h3>${adm?'All bookings':'My bookings'}</h3><table><tr><th>ID<th>Charger<th>Start<th>End<th>Status<th>kWh<th>₹<th></tr>`+bk.map(b=>`<tr><td>${b.id}<td>${cn(b.chargerId)}<td>${b.startTime.replace('T',' ')}<td>${b.endTime.replace('T',' ')}<td>${b.status}<td>${b.energyKwh}<td>${b.amount}${b.paid?' ✔':''}<td>`+
+  (b.status=='BOOKED'?`<button onclick="act('/bookings/${b.id}/start')">Start</button><button class=x onclick="act('/bookings/${b.id}/cancel')">Cancel</button>`:'')+
+  (b.status=='CHARGING'?`<button onclick="act('/bookings/${b.id}/stop')">Stop</button>`:'')+(b.status=='COMPLETED'&&!b.paid?`<button onclick="act('/bookings/${b.id}/pay')">Pay</button>`:'')+`</tr>`).join('')+`</table></div>`;
+ if(adm){const r=await api('/reports');h+=`<div class=card><h3>Report</h3>`+Object.entries(r).map(([k,v])=>`<b>${k}</b>: ${typeof v=='number'?Math.round(v*100)/100:v} &nbsp; `).join('')+`</div>
+ <div class=card><h3>Add station</h3><input id=sn placeholder=Name><input id=sl placeholder=Location><button onclick="addStation()">Add</button>
+ <h3>Add charger</h3><select id=cs>${st.map(s=>`<option value=${s.id}>${s.name}</option>`).join('')}</select><select id=ct><option>AC<option>DC</select><input id=cp type=number placeholder="kW"><input id=cr type=number placeholder="₹/kWh"><button onclick="addCharger()">Add</button></div>`}
+ $('app').innerHTML=h}
+render();
+</script></body></html>
